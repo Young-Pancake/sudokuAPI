@@ -91,7 +91,3 @@ def generate_sudoku(difficulty: str) -> dict:
                 "puzzle_solved": solution,
                 "difficulty": difficulty,
             }
-
-
-p = generate_sudoku("easy")
-print(p)

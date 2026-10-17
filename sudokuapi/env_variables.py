@@ -3,6 +3,7 @@ import os
 load_dotenv()
 DB_KEY = os.getenv("PG_URL")
 API_KEY = os.getenv("API_KEY")
+API_URL = os.getenv("API_URL")
 
 if DB_KEY is None:
     raise RuntimeError("DB_KEY is not set in .env")
