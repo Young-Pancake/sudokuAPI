@@ -1,0 +1,15 @@
+name: Daily puzzles
+
+on:
+  schedule:
+    - cron: "0 0 * * *" 
+  workflow_dispatch:       
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate three puzzles
+        run: |
+          curl -f -X POST "${{ vars.API_URL }}/sudokus/generate" \
+            -H "X-API-Key: ${{ secrets.API_KEY }}"
