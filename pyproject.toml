@@ -15,3 +15,9 @@ dependencies = [
     "uvicorn[standard]>=0.54.0",
 ]
 
+[tool.fastapi]
+entrypoint = "sudokuapi.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
