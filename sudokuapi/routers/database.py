@@ -1,11 +1,13 @@
-from ..env_variables import DB_KEY 
+from ..env_variables import DB_KEY
 from ..dependencies import require_api_key
 from ..services.tools import seed_to_index, generate_sudoku
 from typing import Annotated
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import SQLModel, Field, Session, create_engine, select
 from sqlalchemy import Column, func
 from sqlalchemy.dialects.postgresql import INTEGER, ARRAY
+
 
 class Sudoku(SQLModel, table=True):
     __tablename__ = "puzzles"
@@ -13,39 +15,57 @@ class Sudoku(SQLModel, table=True):
     puzzle: list[list[int]] = Field(sa_column=Column(ARRAY(INTEGER, dimensions=2)))
     puzzle_solved: list[list[int]] = Field(sa_column=Column(ARRAY(INTEGER, dimensions=2)))
     difficulty: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class SudokuCreate(SQLModel):
+    puzzle: list[list[int]]
+    puzzle_solved: list[list[int]]
+    difficulty: str
+
 
 class SudokuUpdate(SQLModel):
     puzzle: list[list[int]] | None = None
     puzzle_solved: list[list[int]] | None = None
     difficulty: str | None = None
 
+
 class SudokuSeed(SQLModel):
     seed: int
     difficulty: str
+
 
 class SudokuRead(SQLModel):
     id: int
     puzzle: list[list[int]]
     puzzle_solved: list[list[int]]
     difficulty: str
-    
+    created_at: datetime
+    updated_at: datetime
+
+
 pg_address = str(DB_KEY)
-engine = create_engine(pg_address, echo=True)
+engine = create_engine(pg_address, echo=False)
+
 
 def get_session():
     with Session(engine) as session:
         yield session
 
+
 SessionDep = Annotated[Session, Depends(get_session)]
 
 router = APIRouter()
 
+
 @router.post("/sudokus/", response_model=SudokuRead, dependencies=[Depends(require_api_key)])
-async def create_sudoku(sudoku: Sudoku, session: SessionDep) -> Sudoku:
-    session.add(sudoku)
+async def create_sudoku(sudoku: SudokuCreate, session: SessionDep):
+    row = Sudoku(**sudoku.model_dump())
+    session.add(row)
     session.commit()
-    session.refresh(sudoku)
-    return sudoku
+    session.refresh(row)
+    return row
 
 
 @router.post("/sudokus/generate", response_model=list[SudokuRead], dependencies=[Depends(require_api_key)])
@@ -71,24 +91,31 @@ def generate_daily_puzzles(session: SessionDep):
             )
     return created
 
+
 @router.get("/sudokus/", response_model=list[SudokuRead])
 async def read_sudokus(session: SessionDep):
     sudokus = session.exec(select(Sudoku)).all()
     return sudokus
 
+
 @router.get("/sudokus/seed", response_model=SudokuRead)
 async def read_sudoku_by_seed(difficulty_and_seed: Annotated[SudokuSeed, Query()], session: SessionDep):
     count = session.exec(
-    select(func.count()).where(Sudoku.difficulty == difficulty_and_seed.difficulty)
+        select(func.count()).where(Sudoku.difficulty == difficulty_and_seed.difficulty)
     ).one()
     if count == 0:
         raise HTTPException(status_code=404, detail="no puzzles for this difficulty")
 
     index = seed_to_index(difficulty_and_seed.seed, count)
-    answer = session.exec(select(Sudoku)
-                 .where(Sudoku.difficulty == difficulty_and_seed.difficulty)
-                 .order_by(Sudoku.id).offset(index).limit(1)).first()
+    answer = session.exec(
+        select(Sudoku)
+        .where(Sudoku.difficulty == difficulty_and_seed.difficulty)
+        .order_by(Sudoku.id)
+        .offset(index)
+        .limit(1)
+    ).first()
     return answer
+
 
 @router.get("/sudokus/{sudoku_id}", response_model=SudokuRead)
 async def read_sudoku(sudoku_id: int, session: SessionDep):
@@ -96,6 +123,7 @@ async def read_sudoku(sudoku_id: int, session: SessionDep):
     if not sudoku:
         raise HTTPException(status_code=404, detail="puzzle not found")
     return sudoku
+
 
 @router.put("/sudokus/{sudoku_id}", response_model=SudokuRead, dependencies=[Depends(require_api_key)])
 async def update_sudoku(
@@ -108,17 +136,20 @@ async def update_sudoku(
         raise HTTPException(status_code=404, detail="puzzle not found")
     for key, val in update.model_dump(exclude_unset=True).items():
         setattr(sudoku, key, val)
-    
+    sudoku.updated_at = datetime.now(timezone.utc)
+
     session.add(sudoku)
     session.commit()
     session.refresh(sudoku)
     return sudoku
+
 
 @router.delete("/sudokus/{sudoku_id}", dependencies=[Depends(require_api_key)])
 async def delete_sudoku(sudoku_id: int, session: SessionDep):
     sudoku = session.get(Sudoku, sudoku_id)
     if not sudoku:
         raise HTTPException(status_code=404, detail="puzzle not found")
+    deleted_id = sudoku.id
     session.delete(sudoku)
     session.commit()
-    return {"ok": sudoku.id}
+    return {"ok": deleted_id}
